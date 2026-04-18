@@ -1,10 +1,11 @@
 import os
+import re
 import json
 import logging
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
 
 load_dotenv()
@@ -17,13 +18,20 @@ from formatter import format_response
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Flask serves the frontend folder as static files — same origin, no CORS issues.
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="")
 CORS(app)
 
 model = BedrockModel()
+
+
+# ─── Utility ──────────────────────────────────────────────────────────────────
+
+def _split_sentences(text: str) -> list:
+    """Split answer into sentences for sentence-level Polly streaming."""
+    parts = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [p.strip() for p in parts if p.strip()]
 
 
 # ─── Static / health ─────────────────────────────────────────────────────────
@@ -45,8 +53,7 @@ def get_profile():
     disability = request.args.get("disability", "visual")
     try:
         pm = ProfileManager()
-        profile = pm.get_preset(disability)
-        return jsonify(profile)
+        return jsonify(pm.get_preset(disability))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -79,7 +86,6 @@ def analyze():
     if not image:
         return jsonify({"error": "No image uploaded"}), 400
 
-    # Parse profile from form field (multipart sends it as a string)
     profile_raw = request.form.get("profile")
     pm = ProfileManager()
     if profile_raw:
@@ -94,23 +100,19 @@ def analyze():
     try:
         image.save(tmp_path)
         raw = model.process_image(tmp_path, profile)
-        result = format_response(raw)
-        return jsonify(result)
+        return jsonify(format_response(raw))
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
 
-# ─── Voice (transcript → Bedrock answer → Polly audio) ───────────────────────
+# ─── Voice — single-shot (kept for compatibility) ────────────────────────────
 
 @app.route("/voice", methods=["POST"])
 def voice():
     """
-    Option A architecture: browser SpeechRecognition handles STT.
-    This endpoint receives plain text and returns JSON + base64 MP3.
-
-    Body:  { transcript, profile, context }
-    Returns: { transcript, answer, subject, follow_up, confidence, audio_b64 }
+    Non-streaming voice endpoint.
+    Prefer /voice/stream for real-time demos — this is kept for fallback.
     """
     body = request.get_json(force=True, silent=True) or {}
 
@@ -118,27 +120,20 @@ def voice():
     if not transcript:
         return jsonify({"error": "transcript field required"}), 400
 
-    raw_profile = body.get("profile")
     pm = ProfileManager()
-    if raw_profile and isinstance(raw_profile, dict):
-        profile = raw_profile
-    else:
-        profile = pm.get_preset("motor")
+    raw_profile = body.get("profile")
+    profile = raw_profile if isinstance(raw_profile, dict) else pm.get_preset("motor")
 
-    # Guard — only allow voice-input-enabled profiles
     if not profile.get("voice_input", False):
         return jsonify({"error": "Voice input not enabled for this profile"}), 403
 
-    # RULE 5 — cap context at 4 turns
     context = body.get("context", [])[-4:]
+    image_b64 = body.get("image_b64")
 
     try:
         vm = VoiceModel()
+        answer_dict = vm.answer_question(transcript, profile, context, image_b64)
 
-        # Step 1 — Bedrock answer (RULE 1: max_tokens=350 inside VoiceModel)
-        answer_dict = vm.answer_question(transcript, profile, context)
-
-        # Step 2 — Polly synthesis immediately after Bedrock (RULE 3 — no delay)
         audio_b64 = None
         if profile.get("voice_output") and not profile.get("captions_only"):
             audio_b64 = vm.synthesize_speech(answer_dict["answer"], profile)
@@ -151,11 +146,106 @@ def voice():
             "confidence": answer_dict["confidence"],
             "audio_b64": audio_b64,
         })
-
     except Exception as exc:
         logger.error("/voice error: %s", exc, exc_info=True)
         return jsonify({"error": str(exc)}), 500
 
 
+# ─── Voice Stream — sentence-level Polly streaming via SSE ───────────────────
+
+@app.route("/voice/stream", methods=["POST"])
+def voice_stream():
+    """
+    Streaming voice endpoint using Server-Sent Events.
+
+    Flow:
+      1. Bedrock answer generated (non-streaming, max_tokens=350)
+      2. Answer split into sentences
+      3. Each sentence synthesized by Polly and streamed immediately
+         → first audio chunk arrives at browser ~400ms after Bedrock responds
+         → subsequent sentences play back-to-back without gaps
+
+    SSE event types:
+      { type: "answer",  text, subject, confidence }   — sent first, updates UI
+      { type: "audio",   b64 }                          — one per sentence
+      { type: "done",    follow_up }                    — final event
+      { type: "error",   message }                      — on failure
+    """
+    body = request.get_json(force=True, silent=True) or {}
+
+    transcript = body.get("transcript", "").strip()
+    if not transcript:
+        return jsonify({"error": "transcript field required"}), 400
+
+    pm = ProfileManager()
+    raw_profile = body.get("profile")
+    profile = raw_profile if isinstance(raw_profile, dict) else pm.get_preset("motor")
+
+    if not profile.get("voice_input", False):
+        return jsonify({"error": "Voice input not enabled for this profile"}), 403
+
+    context = body.get("context", [])[-4:]
+    image_b64 = body.get("image_b64")   # current board frame, may be None
+
+    def generate():
+        try:
+            vm = VoiceModel()
+
+            # Step 1 — get Bedrock answer (includes board image if provided)
+            answer_dict = vm.answer_question(transcript, profile, context, image_b64)
+
+            # Step 2 — stream answer text first so UI updates immediately
+            yield (
+                "data: "
+                + json.dumps({
+                    "type": "answer",
+                    "text": answer_dict["answer"],
+                    "subject": answer_dict["subject"],
+                    "confidence": answer_dict["confidence"],
+                })
+                + "\n\n"
+            )
+
+            # Step 3 — sentence-level Polly synthesis and streaming
+            # First sentence audio arrives ~400ms after Bedrock responds
+            # Subsequent sentences synthesize while first is already playing
+            if profile.get("voice_output") and not profile.get("captions_only"):
+                sentences = _split_sentences(answer_dict["answer"])
+                for sentence in sentences:
+                    audio_b64_chunk = vm.synthesize_speech(sentence, profile)
+                    if audio_b64_chunk:
+                        yield (
+                            "data: "
+                            + json.dumps({"type": "audio", "b64": audio_b64_chunk})
+                            + "\n\n"
+                        )
+
+            # Step 4 — final event with follow-up suggestions
+            yield (
+                "data: "
+                + json.dumps({"type": "done", "follow_up": answer_dict["follow_up"]})
+                + "\n\n"
+            )
+
+        except Exception as exc:
+            logger.error("/voice/stream error: %s", exc, exc_info=True)
+            yield (
+                "data: "
+                + json.dumps({"type": "error", "message": str(exc)})
+                + "\n\n"
+            )
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",      # disable nginx buffering if behind proxy
+            "Connection": "keep-alive",
+        },
+    )
+
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    # threaded=True is required for SSE — each request needs its own thread
+    app.run(debug=True, threaded=True)

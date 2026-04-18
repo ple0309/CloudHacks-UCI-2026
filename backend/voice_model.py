@@ -2,7 +2,8 @@
 Option A Voice Model — Browser SpeechRecognition for STT (zero latency),
 Amazon Bedrock for answers, Amazon Polly for neural voice output.
 
-NO Amazon Transcribe is used anywhere in this file.
+Supports "sees the board": caller may pass image_b64 (JPEG) so that
+Bedrock can see the current webcam frame alongside the student's question.
 """
 
 import os
@@ -40,19 +41,26 @@ class VoiceModel:
                 aws_access_key_id=access_key,
                 aws_secret_access_key=secret_key,
             )
-            logger.info("Polly client initialised (voice_id default: Joanna)")
+            logger.info("Polly client initialised")
         else:
             self.polly = None
             logger.warning("No IAM creds — Polly disabled, frontend uses Web Speech API fallback")
 
-    def answer_question(self, transcript: str, profile: dict, context: list = None) -> dict:
+    def answer_question(
+        self,
+        transcript: str,
+        profile: dict,
+        context: list = None,
+        image_b64: str = None,      # JPEG base64 from current webcam frame
+    ) -> dict:
         """
         Send the student's spoken question to Bedrock and return a structured answer.
 
-        RULE 1: max_tokens = 350 — short answers only.
-        RULE 5: context capped at 4 turns before this call.
+        image_b64: when provided, Claude sees the current board/worksheet alongside
+                   the question — enables "what does this mean?" style queries.
 
-        Returns: { answer, subject, follow_up, confidence }
+        RULE 1: max_tokens = 350 — short answers only.
+        RULE 5: context capped at 4 turns.
         """
         from profile import ProfileManager
         pm = ProfileManager()
@@ -62,7 +70,30 @@ class VoiceModel:
         safe_context = (context or [])[-4:]
 
         messages = list(safe_context)
-        messages.append({"role": "user", "content": transcript})
+
+        # Build the user message — include board image when available
+        if image_b64:
+            user_content = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": image_b64,
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": (
+                        "[The student's current board or worksheet is shown in the image above.]\n\n"
+                        f"Student question: {transcript}"
+                    ),
+                },
+            ]
+        else:
+            user_content = transcript
+
+        messages.append({"role": "user", "content": user_content})
 
         payload = {
             "anthropic_version": "bedrock-2023-05-31",
@@ -120,10 +151,10 @@ class VoiceModel:
 
     def synthesize_speech(self, text: str, profile: dict) -> str | None:
         """
-        Convert answer text to speech via Amazon Polly.
+        Convert text to speech via Amazon Polly.
 
         RULE 2: trim to 800 chars before sending to Polly.
-        RULE 4: return base64-encoded MP3 in JSON — NO S3 upload.
+        RULE 4: return base64-encoded MP3 — NO S3 upload.
 
         Returns base64 MP3 string, or None if Polly unavailable.
         """
@@ -131,10 +162,9 @@ class VoiceModel:
             return None
 
         if not self.polly:
-            logger.info("Polly unavailable — frontend will use Web Speech API")
             return None
 
-        # RULE 2 — trim to 800 chars (keeps Polly synthesis under ~800ms)
+        # RULE 2 — trim to 800 chars (keeps synthesis under ~800ms)
         trimmed = text[:800]
         voice_id = profile.get("polly_voice", "Joanna")
 

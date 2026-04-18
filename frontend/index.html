@@ -25,6 +25,63 @@
     <!-- Screen-reader live region: announces explanation updates automatically -->
     <div id="ariaLive" aria-live="polite" aria-atomic="true" class="sr-only"></div>
 
+    <!-- ── Onboarding overlay ── blocks all interaction until profile chosen ── -->
+    <div id="onboarding-overlay" role="dialog" aria-modal="true"
+         aria-labelledby="onboarding-title">
+        <div class="onboarding-card">
+            <p class="eyebrow" style="margin:0 0 6px;">MuTeX — Accessible Math</p>
+            <h2 id="onboarding-title">How do you prefer to study?</h2>
+            <p class="onboarding-sub">
+                MuTeX adapts its interface and voice to match your needs.
+            </p>
+
+            <div id="profile-cards">
+
+                <div class="profile-option" data-disability="visual" tabindex="0"
+                     role="button" aria-label="Visual impairment profile">
+                    <div class="po-icon">👁</div>
+                    <div class="po-title">Visual impairment</div>
+                    <div class="po-sub">Audio-first · screen reader · high contrast</div>
+                </div>
+
+                <div class="profile-option" data-disability="motor" tabindex="0"
+                     role="button" aria-label="Motor disability profile">
+                    <div class="po-icon">🎙</div>
+                    <div class="po-title">Motor disability</div>
+                    <div class="po-sub">Hands-free · voice control · speak to study</div>
+                </div>
+
+                <div class="profile-option" data-disability="cognitive" tabindex="0"
+                     role="button" aria-label="Learning difference profile">
+                    <div class="po-icon">🧩</div>
+                    <div class="po-title">Learning difference</div>
+                    <div class="po-sub">Simplified · step-by-step · adaptive level</div>
+                </div>
+
+                <div class="profile-option" data-disability="hearing" tabindex="0"
+                     role="button" aria-label="Deaf or hard of hearing profile">
+                    <div class="po-icon">📝</div>
+                    <div class="po-title">Deaf / hard of hearing</div>
+                    <div class="po-sub">Visual only · captions · no audio dependency</div>
+                </div>
+
+                <div class="profile-option profile-option--wide" data-disability="multi"
+                     tabindex="0" role="button" aria-label="Multiple needs profile">
+                    <div class="po-icon">⚡</div>
+                    <div class="po-title">I have multiple needs</div>
+                    <div class="po-sub">All features active — full accessibility stack</div>
+                </div>
+
+            </div>
+
+            <button id="onboarding-confirm" disabled onclick="confirmProfile()"
+                    aria-label="Continue with selected profile">
+                Continue
+            </button>
+        </div>
+    </div>
+    <!-- ── End onboarding ── -->
+
     <div class="page">
         <header class="hero">
             <p class="eyebrow">Accessible Math Transcription</p>
@@ -36,6 +93,14 @@
 
         <!-- Warning banner (hidden by default, shown on low confidence / errors) -->
         <div id="warningBanner" class="warning-banner" hidden aria-live="assertive" role="alert"></div>
+
+        <!-- Profile badge — always visible after onboarding -->
+        <div id="profile-badge" aria-label="Current accessibility profile">
+            Mode: <span id="profile-name">—</span>
+            <button onclick="resetProfile()" aria-label="Change accessibility profile">
+                Change
+            </button>
+        </div>
 
         <main class="dashboard" aria-label="MuTeX analysis dashboard">
             <section class="card camera-card" aria-label="Live camera feed">
@@ -56,6 +121,35 @@
                 </div>
 
                 <p id="status" class="status-text" aria-live="polite">Status: idle</p>
+
+                <!-- ── Voice Study Mode panel ── shown only for voice-input profiles ── -->
+                <section id="voice-panel" aria-label="Voice study mode" hidden>
+                    <div class="voice-panel-label">VOICE STUDY MODE</div>
+
+                    <div id="voice-status" role="status" aria-live="polite">
+                        Ready — press and hold to speak, or enable Always On
+                    </div>
+
+                    <!-- Always-on toggle: continuous hands-free mode -->
+                    <button id="always-on-btn"
+                            aria-label="Toggle always-on listening mode"
+                            aria-pressed="false"
+                            onclick="toggleAlwaysOn()">
+                        🎙 Always On
+                    </button>
+
+                    <!-- Push-to-talk: hidden in always-on mode -->
+                    <button id="voice-record-btn"
+                            aria-label="Press and hold to ask a question"
+                            aria-describedby="voice-status">
+                        🎙 Hold to speak
+                    </button>
+
+                    <div id="voice-transcript" aria-live="polite" role="status"></div>
+                    <div id="voice-answer" aria-live="assertive"></div>
+                    <div id="voice-subject"></div>
+                    <div id="follow-ups"></div>
+                </section>
             </section>
 
             <section class="card result-card" aria-label="Detected math result">
