@@ -610,6 +610,185 @@ body.simplified .card-header h2 {
     font-size: 28px;
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   SIGN LANGUAGE MODE
+   ══════════════════════════════════════════════════════════════════ */
+
+#sign-panel {
+    width: min(1400px, 94vw);
+    margin: 28px auto 0;
+    padding: 24px 28px;
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    background: var(--panel);
+    backdrop-filter: blur(14px);
+    box-shadow: var(--shadow);
+}
+
+.sl-hint {
+    font-size: 12px;
+    color: var(--muted);
+    margin: 0 0 12px;
+    line-height: 1.5;
+}
+
+.sl-label {
+    font-size: 11px;
+    color: #6b7280;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────── */
+
+.sl-btn {
+    display: block;
+    width: 100%;
+    padding: 12px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, transform 0.05s;
+    box-shadow: none;
+    user-select: none;
+}
+
+.sl-btn--outline {
+    border: 1.5px solid var(--border);
+    background: rgba(255,255,255,0.04);
+    color: var(--text);
+}
+.sl-btn--outline:hover {
+    border-color: rgba(255,255,255,0.35);
+    background: var(--panel-strong);
+    transform: none; opacity: 1;
+}
+
+.sl-btn--primary {
+    border: 1.5px solid #1D9E75;
+    background: rgba(29,158,117,0.12);
+    color: #1D9E75;
+}
+.sl-btn--primary:hover {
+    background: rgba(29,158,117,0.22);
+    transform: none; opacity: 1;
+}
+
+.sl-btn--ghost {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-weight: 500;
+}
+.sl-btn--ghost:hover {
+    border-color: rgba(255,255,255,0.3);
+    color: var(--text);
+    transform: none; opacity: 1;
+}
+
+.sl-btn--sign {
+    border: 1.5px solid #1D9E75;
+    background: rgba(29,158,117,0.12);
+    color: #1D9E75;
+}
+.sl-btn--sign:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+.sl-btn--sign:not(:disabled):hover {
+    background: rgba(29,158,117,0.22);
+    transform: none; opacity: 1;
+}
+
+/* ── Preview image ───────────────────────────────────────────────── */
+
+.sl-preview-img {
+    width: 100%;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    margin-bottom: 8px;
+    display: block;
+}
+
+/* ── LaTeX box ───────────────────────────────────────────────────── */
+
+.sl-latex-box {
+    font-size: 15px;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    min-height: 32px;
+    color: var(--text);
+}
+
+/* ── Sign camera ──────────────────────────────────────────────────── */
+
+.sl-video-wrapper {
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #000;
+    margin-bottom: 12px;
+}
+
+#sl-video {
+    display: block;
+    width: 100%;
+    /* Mirror for natural selfie feel. No object-fit:cover — avoids coordinate
+       mismatch between the cropped display and the canvas landmark positions. */
+    transform: scaleX(-1);
+}
+
+#sl-canvas {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    /* classifyASL() flips x internally (norm.x = -norm.x) to compensate for
+       the raw (non-flipped) landmark stream. The canvas itself must also be
+       CSS-mirrored so the drawn skeleton aligns with the mirrored video. */
+    transform: scaleX(-1);
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* ── Live text box ───────────────────────────────────────────────── */
+
+.sl-live-box {
+    padding: 12px 14px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    min-height: 52px;
+}
+
+#sl-live-text {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.08em;
+    min-height: 28px;
+}
+
+/* ── Answer section ──────────────────────────────────────────────── */
+
+.sl-echo {
+    font-size: 12px;
+    color: var(--muted);
+    font-style: italic;
+    margin-bottom: 8px;
+}
+
+.sl-answer-text {
+    font-size: 15px;
+    line-height: 1.75;
+    color: var(--text);
+    white-space: pre-wrap;
+}
+
 @media (max-width: 1100px) {
     .dashboard {
         grid-template-columns: 1fr;

@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="api-url" content="" />
     <title>MuTeX Live Demo</title>
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="style.css?v=12" />
 
     <!-- MathJax — supports display math \[ \] and inline math \( \) -->
     <script>
@@ -180,9 +180,121 @@
                 </div>
             </section>
         </main>
+
+        <!-- ── Sign Language Mode ── shown for hearing / multi profiles ── -->
+        <section id="sign-panel" aria-label="Sign language study mode" hidden>
+
+            <div class="voice-panel-label" style="color:#1D9E75;">SIGN LANGUAGE MODE</div>
+
+            <div id="sl-status" role="status" aria-live="polite"
+                 style="font-size:13px; margin-bottom:12px;">
+                Point camera at your math problem and click Capture
+            </div>
+
+            <!-- Step 1: Capture the math problem -->
+            <div id="sl-capture-section">
+                <p class="sl-hint">
+                    Step 1 — Camera is pointing at your math problem. Click when ready.
+                </p>
+                <button id="sl-capture-btn"
+                        onclick="captureForSign()"
+                        aria-label="Capture math problem from camera"
+                        class="sl-btn sl-btn--outline">
+                    📸 Capture this problem
+                </button>
+            </div>
+
+            <!-- Captured problem preview (visible in captured + answered modes) -->
+            <div id="sl-captured-section" hidden style="margin-top:16px;">
+                <div class="sl-label">Captured problem</div>
+                <img id="sl-preview-img"
+                     alt="Captured math problem"
+                     class="sl-preview-img" />
+                <div id="sl-captured-latex" class="sl-latex-box"></div>
+
+                <button onclick="setSLMode('signing')"
+                        aria-label="Start signing your question"
+                        class="sl-btn sl-btn--primary" style="margin-top:10px;">
+                    ✋ Ask about this
+                </button>
+                <button onclick="setSLMode('idle')"
+                        class="sl-btn sl-btn--ghost" style="margin-top:6px;">
+                    ↩ Capture a different problem
+                </button>
+            </div>
+
+            <!-- Step 2: Signing mode -->
+            <div id="sl-signing-section" hidden style="margin-top:16px;">
+                <p class="sl-hint">
+                    Step 2 — Turn camera toward your hands and fingerspell your question.
+                    Hold each letter still until it appears. Pause between words.
+                </p>
+
+                <div class="sl-video-wrapper">
+                    <video id="sl-video" autoplay playsinline muted
+                           aria-label="Sign language camera feed"></video>
+                    <canvas id="sl-canvas" aria-hidden="true"></canvas>
+                </div>
+
+                <div class="sl-live-box">
+                    <div class="sl-label">Signing:</div>
+                    <div id="sl-live-text" aria-live="polite" aria-label="Signed letters">…</div>
+                    <!-- REMOVE BEFORE FINAL DEMO -->
+                    <div id="sl-debug"
+                         style="font-size:10px; color:#aaa; font-family:monospace;
+                                margin-top:4px; min-height:16px;"></div>
+                </div>
+
+                <div style="display:flex; gap:8px; margin-top:10px;">
+                    <button onclick="slDeleteLast()"
+                            aria-label="Delete last letter"
+                            class="sl-btn sl-btn--ghost" style="flex:0 0 auto;">
+                        ← Delete
+                    </button>
+                    <button id="sl-submit-btn"
+                            onclick="submitSignedQuestion()"
+                            disabled
+                            aria-label="Send signed question"
+                            class="sl-btn sl-btn--sign" style="flex:1;">
+                        Send (or press Enter)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Answer display -->
+            <div id="sl-answer-section" hidden style="margin-top:16px;">
+                <div id="sl-signed-echo" class="sl-echo"></div>
+                <div id="sl-answer-latex" hidden class="sl-latex-box"></div>
+                <div id="sl-answer-text" aria-live="assertive" class="sl-answer-text"></div>
+
+                <div style="display:flex; gap:8px; margin-top:14px;">
+                    <button onclick="setSLMode('signing')"
+                            class="sl-btn sl-btn--primary" style="flex:1;">
+                        ✋ Ask another question
+                    </button>
+                    <button onclick="setSLMode('idle')"
+                            class="sl-btn sl-btn--ghost" style="flex:1;">
+                        🔄 New problem
+                    </button>
+                </div>
+            </div>
+
+        </section>
+        <!-- ── End Sign Language Mode ── -->
+
     </div>
 
-    <script src="script.js"></script>
+    <!-- TensorFlow.js hand-pose-detection (tfjs runtime — no MediaPipe CDN/WASM needed) -->
+    <!-- tf.min.js bundles core + WebGL + WASM + converter in one file -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"
+            crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection@2.0.0/dist/hand-pose-detection.min.js"
+            crossorigin="anonymous"></script>
+
+    <!-- script.js first (defines API_URL, userProfile), then sign_language.js -->
+    <!-- ?v= bumped on every meaningful change to bust the browser cache -->
+    <script src="script.js?v=12"></script>
+    <script src="sign_language.js?v=12"></script>
 </body>
 
 </html>

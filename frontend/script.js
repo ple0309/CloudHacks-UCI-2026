@@ -230,6 +230,7 @@ async function confirmProfile() {
 
 function applyProfile(profile) {
     userProfile = profile;
+    window.userProfile = profile;   // expose to sign_language.js (let vars don't attach to window)
     localStorage.setItem("mutex_profile", JSON.stringify(profile));
 
     const nameEl = document.getElementById("profile-name");
@@ -249,6 +250,9 @@ function applyProfile(profile) {
 
     document.body.classList.toggle("high-contrast", !!profile.high_contrast);
     document.body.classList.toggle("simplified",    !!profile.simplified_ui);
+
+    // Activate Sign Language Mode if profile is hearing or multi
+    if (window.slInit) window.slInit();
 }
 
 function resetProfile() {
@@ -583,6 +587,10 @@ function resetVoiceButton() {
 
 initProfile();
 initRecognition();
+// slInit() is also called inside applyProfile() whenever a profile is set/loaded.
+// The call below handles the case where slInit runs before sign_language.js loads,
+// so we defer it slightly to ensure sign_language.js has executed first.
+setTimeout(() => { if (window.slInit) window.slInit(); }, 0);
 
 // Hold-to-speak (push-to-talk) on the record button
 const voiceRecordBtn = document.getElementById("voice-record-btn");
