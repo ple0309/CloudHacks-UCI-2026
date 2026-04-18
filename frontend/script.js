@@ -153,6 +153,8 @@ async function captureAndAnalyzeFrame() {
             if (window.MathJax) MathJax.typesetPromise([renderedEl]).catch(console.error);
             announceToScreenReader(data.explanation || "");
             statusEl.textContent = "Status: updated";
+            // Fire-and-forget — never blocks LaTeX rendering
+            fetchRecommendations(lastLatex, lastExplanation);
         } else {
             statusEl.textContent = "Status: stable";
             statusBadge.textContent = lastConfidence || "stable";
@@ -467,6 +469,12 @@ async function sendVoiceQueryStream(transcript, imageB64) {
                 profile:   userProfile,
                 context:   conversationContext.slice(-4),   // RULE 5
                 image_b64: imageB64 || null,
+                board_context: {
+                    last_latex:       lastLatex       || "",
+                    last_explanation: lastExplanation || "",
+                    last_confidence:  lastConfidence  || "",
+                    recommendations:  lastRecommendations,
+                },
             }),
         });
 
@@ -536,23 +544,60 @@ function handleStreamEvent(data, originalTranscript) {
         }
 
         // Render follow-up suggestion chips
+        // follow_up items may be plain strings OR {text, latex} objects
         const fuEl = document.getElementById("follow-ups");
         if (fuEl && data.follow_up?.length > 0) {
             fuEl.innerHTML = "";
-            data.follow_up.forEach(q => {
+            const mathEls = [];
+            data.follow_up.forEach((q, idx) => {
+                const text  = typeof q === "object" ? (q.text  || "") : q;
+                const latex = typeof q === "object" ? (q.latex || "") : "";
+
                 const btn = document.createElement("button");
-                btn.textContent = q;
-                btn.className   = "follow-up-btn";
-                btn.setAttribute("aria-label", "Ask: " + q);
+                btn.className = "follow-up-btn";
+                btn.setAttribute("aria-label", "Ask: " + text);
+
+                if (latex) {
+                    const mathEl = document.createElement("div");
+                    mathEl.className   = "fu-latex";
+                    mathEl.textContent = `\\(\\displaystyle ${latex}\\)`;
+                    btn.appendChild(mathEl);
+                    mathEls.push(mathEl);
+                }
+
+                const labelEl = document.createElement("div");
+                labelEl.className   = "fu-text";
+                labelEl.textContent = `${idx + 1}. ${text}`;
+                btn.appendChild(labelEl);
+
                 btn.onclick = () => {
-                    document.getElementById("voice-transcript").textContent = "You: " + q;
+                    document.getElementById("voice-transcript").textContent = "You: " + text;
                     setVoiceStatus("Thinking...");
                     fuEl.innerHTML = "";
                     clearAudioQueue();
-                    sendVoiceQueryStream(q, captureFrameBase64());
+                    sendVoiceQueryStream(text, captureFrameBase64());
                 };
                 fuEl.appendChild(btn);
             });
+
+            // Render all LaTeX in one pass
+            if (mathEls.length > 0 && window.MathJax) {
+                MathJax.typesetPromise(mathEls).catch(e => console.warn("MathJax fu render:", e));
+            }
+        }
+
+        // Mirror follow-up chips into the rec-chips section to keep drill loop running
+        if (data.follow_up?.length > 0) {
+            lastRecommendations = data.follow_up.map(q =>
+                typeof q === "object" ? q : { text: q, latex: "" }
+            );
+            const recChips   = document.getElementById("rec-chips");
+            const recSection = document.getElementById("rec-section");
+            if (recChips && recSection) {
+                recSection.hidden = false;
+                recChips.hidden   = false;
+                renderRecChips(lastRecommendations, recChips);
+            }
         }
 
         // Update conversation context — cap at 8 items = 4 turns (RULE 5)
@@ -602,4 +647,228 @@ if (voiceRecordBtn) {
         e.preventDefault(); startListening();
     }, { passive: false });
     voiceRecordBtn.addEventListener("touchend", stopListening);
+}
+
+
+// =============================================================================
+// ─── PRACTICE RECOMMENDATIONS ────────────────────────────────────────────────
+// =============================================================================
+// Triggered after /analyze returns. Non-blocking — never delays LaTeX rendering.
+
+let lastRecommendations = [];   // only new global — [{ text, latex }]
+
+async function fetchRecommendations(latex, explanation) {
+    if (!latex || !userProfile) return;
+
+    const section = document.getElementById("rec-section");
+    const loading = document.getElementById("rec-loading");
+    const chips   = document.getElementById("rec-chips");
+    if (!section || !chips) return;
+
+    // Show loading skeleton immediately; chips area cleared and hidden until ready
+    section.hidden = false;
+    if (loading) loading.hidden = false;
+    chips.innerHTML = "";
+    chips.hidden    = true;
+
+    try {
+        const res = await fetch(`${API_URL}/recommend`, {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({ latex, explanation, profile: userProfile }),
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const recs = (data.recommendations || []).filter(r => r.text);
+
+        if (loading) loading.hidden = true;
+
+        if (recs.length === 0) {
+            section.hidden = true;
+            return;
+        }
+
+        lastRecommendations = recs;
+        chips.hidden = false;
+        renderRecChips(recs, chips);
+
+    } catch (err) {
+        console.warn("/recommend failed (non-critical):", err);
+        if (section) section.hidden = true;
+    }
+}
+
+function renderRecChips(recs, container) {
+    container.innerHTML = "";
+    const mathEls = [];
+
+    recs.forEach((item, idx) => {
+        const chip = document.createElement("div");
+        chip.className = "rec-chip";
+        chip.setAttribute("role",       "button");
+        chip.setAttribute("tabindex",   "0");
+        chip.setAttribute("aria-label", `Practice problem ${idx + 1}: ${item.text}`);
+
+        if (item.latex) {
+            const mathEl = document.createElement("div");
+            mathEl.className   = "rec-latex";
+            // displaystyle forces full-size fraction/integral rendering
+            mathEl.textContent = `\\(\\displaystyle ${item.latex}\\)`;
+            chip.appendChild(mathEl);
+            mathEls.push(mathEl);
+        }
+
+        const textEl = document.createElement("div");
+        textEl.className   = "rec-text";
+        textEl.textContent = `${idx + 1}. ${item.text}`;
+        chip.appendChild(textEl);
+
+        const hintEl = document.createElement("div");
+        hintEl.className   = "rec-hint";
+        hintEl.textContent = "Tap for step-by-step solution →";
+        chip.appendChild(hintEl);
+
+        const activate = () => selectRecChip(chip, item);
+        chip.addEventListener("click",   activate);
+        chip.addEventListener("keydown", e => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); }
+        });
+
+        container.appendChild(chip);
+    });
+
+    // Render all LaTeX in one pass after all chips are in the DOM (constraint #6)
+    if (mathEls.length > 0 && window.MathJax) {
+        MathJax.typesetPromise(mathEls).catch(e => console.warn("MathJax rec render:", e));
+    }
+}
+
+function selectRecChip(chipEl, item) {
+    // Visual selection state
+    document.querySelectorAll(".rec-chip")
+        .forEach(c => c.classList.remove("rec-selected"));
+    chipEl.classList.add("rec-selected");
+
+    // Update status + transcript so the student sees what was activated
+    setVoiceStatus("Solving…");
+    const transcriptEl = document.getElementById("voice-transcript");
+    if (transcriptEl) transcriptEl.textContent = "You: " + item.text;
+
+    // Fire both in parallel — voice answer + visual step-by-step (non-blocking)
+    sendVoiceQueryStream(item.text, captureFrameBase64());
+    fetchSolution(item);   // fire-and-forget
+}
+
+// ── Step-by-step solution panel ───────────────────────────────────────────────
+
+async function fetchSolution(item) {
+    if (!userProfile) return;
+
+    const panel   = document.getElementById("solution-panel");
+    const loading = document.getElementById("solution-loading");
+    const body    = document.getElementById("solution-body");
+    if (!panel) return;
+
+    // Show loading immediately
+    panel.hidden   = false;
+    if (loading) loading.hidden = false;
+    if (body)    body.hidden    = true;
+
+    try {
+        const res = await fetch(`${API_URL}/solve`, {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({
+                latex:   item.latex || "",
+                text:    item.text  || "",
+                profile: userProfile,
+            }),
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+
+        if (loading) loading.hidden = true;
+
+        if (!data.steps || data.steps.length === 0) {
+            panel.hidden = true;
+            return;
+        }
+
+        renderSolutionPanel(item, data);
+
+    } catch (err) {
+        console.warn("/solve failed (non-critical):", err);
+        if (panel)   panel.hidden   = true;
+        if (loading) loading.hidden = true;
+    }
+}
+
+function renderSolutionPanel(item, data) {
+    const body        = document.getElementById("solution-body");
+    const stepsEl     = document.getElementById("solution-steps");
+    const probLatexEl = document.getElementById("solution-problem-latex");
+    const probTextEl  = document.getElementById("solution-problem-text");
+    const answerEl    = document.getElementById("solution-answer");
+    const ansLatexEl  = document.getElementById("solution-answer-latex");
+    if (!body || !stepsEl) return;
+
+    const mathEls = [];
+
+    // Problem header
+    if (probLatexEl) {
+        if (item.latex) {
+            probLatexEl.textContent = `\\(\\displaystyle ${item.latex}\\)`;
+            mathEls.push(probLatexEl);
+        } else {
+            probLatexEl.textContent = "";
+        }
+    }
+    if (probTextEl) probTextEl.textContent = item.text || "";
+
+    // Build step cards
+    stepsEl.innerHTML = "";
+    data.steps.forEach(step => {
+        const li = document.createElement("li");
+        li.className = "solution-step";
+
+        const descEl = document.createElement("div");
+        descEl.className   = "step-description";
+        descEl.textContent = step.description || "";
+        li.appendChild(descEl);
+
+        if (step.latex) {
+            const stepMath = document.createElement("div");
+            stepMath.className   = "step-latex";
+            stepMath.textContent = `\\[${step.latex}\\]`;
+            li.appendChild(stepMath);
+            mathEls.push(stepMath);
+        }
+
+        stepsEl.appendChild(li);
+    });
+
+    // Final answer
+    if (answerEl && ansLatexEl) {
+        if (data.final_latex) {
+            ansLatexEl.textContent = `\\(\\displaystyle ${data.final_latex}\\)`;
+            mathEls.push(ansLatexEl);
+            answerEl.hidden = false;
+        } else {
+            answerEl.hidden = true;
+        }
+    }
+
+    body.hidden = false;
+
+    // Render all LaTeX in one pass, then scroll the panel into view
+    const afterRender = mathEls.length > 0 && window.MathJax
+        ? MathJax.typesetPromise(mathEls).catch(e => console.warn("MathJax solve render:", e))
+        : Promise.resolve();
+
+    afterRender.then(() => {
+        const panel = document.getElementById("solution-panel");
+        if (panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
 }

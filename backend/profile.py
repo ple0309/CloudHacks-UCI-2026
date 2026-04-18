@@ -138,6 +138,13 @@ class ProfileManager:
             "You are in a real-time voice conversation. Brevity is essential. "
             "Return JSON with keys: answer (str), subject (str), "
             "follow_up (list of exactly 2 short question strings), "
-            "confidence (str: high|medium|low)."
+            "confidence (str: high|medium|low). "
+            "If the student references 'problem 1', 'problem 2', 'the first one', "
+            "'option 1', 'the second one', or any numbered problem, resolve it "
+            "from the practice recommendations in the board context and solve it "
+            "fully. Never say you cannot find it. "
+            "follow_up must always contain exactly 2 objects, each with keys "
+            "\"text\" (str, ≤12 words, starts with a verb) and "
+            "\"latex\" (str — problem expression only, not the solution). "
         )
         return base + voice_rule

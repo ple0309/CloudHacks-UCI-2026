@@ -4,13 +4,14 @@
 
 MuTeX turns any math — handwritten or printed — into LaTeX, a rendered equation, a plain-English explanation, and a spoken answer, all in real time. A disability-profile onboarding screen adapts the entire interface before the student ever sees the main view.
 
-Three study modes work together seamlessly:
+Four study modes work together seamlessly:
 
-| Mode | How to trigger | Best for |
-|---|---|---|
-| **Math Transcription** | Start Camera → hold math to webcam | All profiles |
-| **Voice Study Mode** | Select Motor / Multi profile → tap Always On | Hands-free learners |
-| **Sign Language Mode** | Select Deaf / HoH or Multi profile → Capture Problem → Sign | Deaf and hard-of-hearing students |
+| Mode                       | How to trigger                                              | Best for                          |
+| -------------------------- | ----------------------------------------------------------- | --------------------------------- |
+| **Math Transcription**     | Start Camera → hold math to webcam                          | All profiles                      |
+| **Voice Study Mode**       | Select Motor / Multi profile → tap Always On                | Hands-free learners               |
+| **Practice Problems**      | Auto-appears after analysis → click a chip                  | Active learners, all profiles     |
+| **Sign Language Mode**     | Select Deaf / HoH or Multi profile → Capture → Sign         | Deaf and hard-of-hearing students |
 
 ---
 
@@ -25,9 +26,11 @@ Open **http://localhost:5001** in Chrome, then:
 
 1. Pick your accessibility profile on the onboarding screen
 2. Click **Start Camera** and hold math up to the webcam
-3. Select **Motor disability** or **Multiple needs** to unlock Voice Study Mode
-4. Select **Deaf / hard of hearing** or **Multiple needs** to unlock Sign Language Mode
-5. Tap **Always On** — speak any time, hands-free, the tutor responds and talks back automatically
+3. LaTeX, a rendered equation, and an explanation appear on the right
+4. Two **Practice Problems** chips appear below — tap one for a step-by-step solution
+5. Select **Motor disability** or **Multiple needs** to unlock Voice Study Mode
+6. Select **Deaf / hard of hearing** or **Multiple needs** to unlock Sign Language Mode
+7. Tap **Always On** — speak any time, hands-free, the tutor responds and talks back automatically
 
 > **Important:** Use `http://localhost:5001`, not `127.0.0.1:5001`. Chrome's Private Network Access policy blocks cross-origin requests from IP addresses.
 
@@ -36,27 +39,44 @@ Open **http://localhost:5001** in Chrome, then:
 ## What It Does
 
 ### Math Transcription (all profiles)
+
 - Webcam frame captured every 2 s and sent to **Amazon Bedrock (Claude Sonnet 4.6)**
 - Returns LaTeX, rendered via **MathJax**, with a plain-English explanation
 - System prompt personalised per disability profile — descriptive for visual, step-by-step for cognitive, etc.
 - Confidence badge (green / orange / yellow) tells the student when to reposition
 
+### Practice Problems + Step-by-Step Solver (all profiles)
+
+After every successful math analysis, two AI-generated practice chips appear automatically:
+
+- Each chip shows the **rendered problem LaTeX** and a short spoken question (e.g. "Solve the indefinite integral of x cubed")
+- A **"Tap for step-by-step solution →"** hint on every chip makes the interaction clear
+- Clicking a chip simultaneously:
+  1. **Streams a spoken voice answer** through the Voice Study panel (2-3 sentences, Polly / Web Speech API)
+  2. **Renders a full step-by-step solution** in the left card — problem header → numbered steps with per-step LaTeX → green ANSWER block
+- After each voice answer, **two fresh chips** appear automatically from the `follow_up` field, creating a continuous drill loop
+- Problem difficulty adjusts to the student's level (beginner / standard / advanced)
+
+**Problem resolution via voice:** Say "solve problem 1" or "the second one" — Bedrock resolves the reference from the visible chips and explains it fully.
+
 ### Voice Study Mode (motor / multi profiles)
 
-| Capability | How |
-|---|---|
-| **Always-On continuous listening** | Tap once — mic stays open, auto-restarts after every answer |
-| **Hold-to-speak (push-to-talk)** | Press and hold the mic button for a single question |
-| **Sees the board** | Current webcam frame is captured and sent alongside every voice question — Claude answers based on what it sees **and** what the student says |
-| **Sentence-level audio streaming** | Answer split into sentences, each synthesized by Polly/TTS in sequence — first audio plays ~400 ms after Bedrock responds |
-| **Follow-up chips** | Two AI-generated follow-up questions appear after every answer — tap to continue without re-speaking |
-| **Conversation memory** | Last 4 turns sent as context — Claude remembers what was just discussed |
+| Capability                         | How                                                                                                                                           |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Always-On continuous listening** | Tap once — mic stays open, auto-restarts after every answer                                                                                   |
+| **Hold-to-speak (push-to-talk)**   | Press and hold the mic button for a single question                                                                                           |
+| **Sees the board**                 | Current webcam frame is captured and sent alongside every voice question — Claude answers based on what it sees **and** what the student says |
+| **Sentence-level audio streaming** | Answer split into sentences, each synthesized by Polly/TTS in sequence — first audio plays ~400 ms after Bedrock responds                     |
+| **Follow-up chips**                | Two AI-generated follow-up questions appear after every answer — tap to continue without re-speaking                                          |
+| **Conversation memory**            | Last 4 turns sent as context — Claude remembers what was just discussed                                                                       |
 
 ### Real-Time Conversation Loop (Always-On)
+
 ```
 Student speaks  →  mic stops  →  Bedrock answers (sees board + hears question)
     →  Web Speech / Polly reads answer aloud  →  mic restarts automatically
 ```
+
 The mic only opens **after** audio finishes, preventing the computer's voice from being re-captured.
 
 ### Sign Language Mode (deaf / hard of hearing / multi profiles)
@@ -64,11 +84,13 @@ The mic only opens **after** audio finishes, preventing the computer's voice fro
 Two-phase design — no audio dependency, text-only output:
 
 **Phase 1 — CAPTURE**
+
 1. Point the math webcam at the problem and tap **Capture this problem**
 2. The frame is sent to Bedrock → returns LaTeX + plain-English description
 3. The captured image is stored client-side for Phase 2
 
 **Phase 2 — SIGN**
+
 1. Camera restarts for hand detection using **TensorFlow.js hand-pose-detection** (21-landmark MediaPipe model, TF.js runtime)
 2. An offscreen canvas bridges the CSS-mirrored video and the model — raw pixels are drawn to a plain `<canvas>` before passing to TF.js, preventing NaN keypoint corruption
 3. ASL fingerspelling is classified frame-by-frame using angle-based finger-curl detection at each PIP joint (robust to hand tilt and camera distance)
@@ -82,13 +104,13 @@ Two-phase design — no audio dependency, text-only output:
 
 ## Disability Profiles
 
-| Profile | Voice In | Voice Out | Sign Mode | UI Extras |
-|---|---|---|---|---|
-| Visual impairment | — | TTS / Polly | — | High contrast, descriptive explanations |
-| Motor disability | ✓ Always-On / Hold | TTS / Polly | — | Hands-free, voice-first |
-| Learning difference | — | TTS / Polly | — | Simplified UI, step-by-step answers |
-| **Deaf / hard of hearing** | — | — | ✓ | Captions only, zero audio dependency |
-| **Multiple needs** | ✓ Always-On / Hold | TTS / Polly | ✓ | All features active |
+| Profile                    | Voice In           | Voice Out   | Practice Chips | Sign Mode | UI Extras                               |
+| -------------------------- | ------------------ | ----------- | -------------- | --------- | --------------------------------------- |
+| Visual impairment          | —                  | TTS / Polly | ✓              | —         | High contrast, descriptive explanations |
+| Motor disability           | ✓ Always-On / Hold | TTS / Polly | ✓              | —         | Hands-free, voice-first                 |
+| Learning difference        | —                  | TTS / Polly | ✓              | —         | Simplified UI, step-by-step answers     |
+| **Deaf / hard of hearing** | —                  | —           | ✓              | ✓         | Captions only, zero audio dependency    |
+| **Multiple needs**         | ✓ Always-On / Hold | TTS / Polly | ✓              | ✓         | All features active                     |
 
 ---
 
@@ -99,14 +121,23 @@ Browser (Vanilla JS + MathJax 3 + TF.js hand-pose-detection)
   │
   ├─ Camera frame every 2s ──── POST /analyze ──────► Flask ──► BedrockModel
   │  (multipart + profile JSON)                                   profile-aware vision prompt
-  │  ◄── { latex, explanation, confidence } ────────────────────────────────
+  │  ◄── { latex, explanation, confidence }
+  │        │
+  │        ├─ POST /recommend ──────────────────────► Flask ──► Bedrock
+  │        │  (fire-and-forget, non-blocking)                    generates 2 practice chips
+  │        │  ◄── { recommendations: [{text, latex}] }
+  │        │
+  │        └─ [chip click] POST /solve ─────────────► Flask ──► Bedrock
+  │           (parallel with voice stream)                       structured step-by-step JSON
+  │           ◄── { steps: [{num, description, latex}], final_latex }
+  │           → rendered in LEFT card with MathJax
   │
   ├─ Always-On / Hold mic ────── POST /voice/stream ─► Flask ──► VoiceModel
   │  (browser STT → plain text)                                   ├─ answer_question()  → Bedrock
-  │  (+ current board frame as JPEG)                              │  max_tokens = 350
+  │  (+ current board frame + board_context)                      │  max_tokens = 350
   │                                                               └─ synthesize_speech() → Polly
   │                                                                  per sentence, streamed via SSE
-  │  ◄── SSE: { answer } then { audio_b64 } per sentence ───────────────────
+  │  ◄── SSE: { answer } then { audio_b64 } per sentence, { done, follow_up }
   │
   ├─ Sign Language Mode ─────── POST /sign ──────────► Flask ──► Bedrock (direct)
   │  Phase 1: capture math frame → /analyze                       (Claude Sonnet 4.6)
@@ -120,22 +151,24 @@ Browser (Vanilla JS + MathJax 3 + TF.js hand-pose-detection)
 ```
 
 **Speed optimisations:**
-- `max_tokens = 350` — short answers, faster Bedrock generation
+
+- `max_tokens = 350` — short voice answers, faster Bedrock generation
 - Polly input trimmed to 800 chars — synthesis in ~800 ms
 - First sentence audio arrives ~400 ms after Bedrock responds (sentence streaming)
 - Base64 audio embedded in SSE — no S3 round-trip (~400 ms saved)
 - Browser STT fires on first speech result — instant transcript dispatch
+- `/recommend` and `/solve` run in parallel with each other — chips and solution appear without blocking the voice answer
 - TF.js offscreen canvas — clean pixel data, no CSS-transform NaN corruption
 
 ---
 
 ## AWS Services
 
-| Service | Purpose | Auth |
-|---|---|---|
-| **Amazon Bedrock** — Claude Sonnet 4.6 | Vision OCR + voice answers + sign language context | Bedrock API key (Bearer token) |
-| **Amazon Polly** | Neural TTS for Voice Study Mode | IAM — `polly:SynthesizeSpeech` only |
-| **Amazon S3** | *(Optional)* Temporary frame archive | IAM — `s3:PutObject` + `s3:DeleteObject` |
+| Service                                | Purpose                                                          | Auth                                     |
+| -------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------- |
+| **Amazon Bedrock** — Claude Sonnet 4.6 | Vision OCR + voice answers + practice problems + step-by-step   | Bedrock API key (Bearer token)           |
+| **Amazon Polly**                       | Neural TTS for Voice Study Mode                                  | IAM — `polly:SynthesizeSpeech` only      |
+| **Amazon S3**                          | _(Optional)_ Temporary frame archive                             | IAM — `s3:PutObject` + `s3:DeleteObject` |
 
 > **No Amazon Transcribe.** The browser's `SpeechRecognition` API handles all STT — zero cost, zero latency.  
 > **Polly is optional.** If IAM credentials are not set, the browser's Web Speech API speaks the answers automatically.
@@ -145,10 +178,11 @@ Browser (Vanilla JS + MathJax 3 + TF.js hand-pose-detection)
 ## Setup
 
 ### Prerequisites
+
 - Python 3.10+
 - AWS account with Bedrock enabled for `us.anthropic.claude-sonnet-4-6`
 - Bedrock API key — AWS Console → Amazon Bedrock → API keys
-- *(Optional)* IAM user with `polly:SynthesizeSpeech` for Polly neural voice
+- _(Optional)_ IAM user with `polly:SynthesizeSpeech` for Polly neural voice
 
 ### Install
 
@@ -192,23 +226,30 @@ Open **http://localhost:5001** — Flask serves the frontend and API on one port
 
 ## API Reference
 
-| Endpoint | Method | Body / Params | Returns |
-|---|---|---|---|
-| `/health` | GET | — | `{ status, model }` |
-| `/profile` | GET | `?disability=motor` | Merged profile preset |
-| `/profile` | POST | `{ disability, overrides }` | Profile with custom overrides |
-| `/analyze` | POST | multipart `image` + `profile` | `{ latex, explanation, confidence }` |
-| `/voice` | POST | `{ transcript, profile, context, image_b64 }` | `{ answer, follow_up, audio_b64, … }` |
-| `/voice/stream` | POST | `{ transcript, profile, context, image_b64 }` | SSE stream of `answer`, `audio`, `done` events |
-| `/sign` | POST | `{ signed_text, image_b64, profile, context }` | `{ answer }` |
+| Endpoint        | Method | Body / Params                                  | Returns                                        |
+| --------------- | ------ | ---------------------------------------------- | ---------------------------------------------- |
+| `/health`       | GET    | —                                              | `{ status, model }`                            |
+| `/profile`      | GET    | `?disability=motor`                            | Merged profile preset                          |
+| `/profile`      | POST   | `{ disability, overrides }`                    | Profile with custom overrides                  |
+| `/analyze`      | POST   | multipart `image` + `profile`                  | `{ latex, explanation, confidence }`           |
+| `/recommend`    | POST   | `{ latex, explanation, profile }`              | `{ recommendations: [{text, latex}] }`         |
+| `/solve`        | POST   | `{ latex, text, profile }`                     | `{ steps: [{num, description, latex}], final_latex }` |
+| `/voice`        | POST   | `{ transcript, profile, context, image_b64 }`  | `{ answer, follow_up, audio_b64, … }`          |
+| `/voice/stream` | POST   | `{ transcript, profile, context, image_b64 }`  | SSE stream of `answer`, `audio`, `done` events |
+| `/sign`         | POST   | `{ signed_text, image_b64, profile, context }` | `{ answer }`                                   |
 
 **`/voice/stream` SSE event types:**
+
 ```
 { type: "answer",  text, subject, confidence }   ← arrives first, updates UI text
 { type: "audio",   b64 }                          ← one per sentence, plays in sequence
 { type: "done",    follow_up }                    ← renders follow-up chips
 { type: "error",   message }                      ← on failure
 ```
+
+**`/recommend`** always returns HTTP 200 — on any Bedrock error it returns `{ "recommendations": [] }` silently so analysis is never blocked.
+
+**`/solve`** always returns HTTP 200 — on any error it returns `{ "steps": [], "final_latex": "" }` silently.
 
 **`/voice` returns 403** if the profile has `voice_input: false`.  
 **`/voice` returns 400** if `transcript` is empty.  
@@ -221,10 +262,10 @@ Open **http://localhost:5001** — Flask serves the frontend and API on one port
 ```
 CloudHacks-UCI-2026/
 ├── backend/
-│   ├── app.py             Flask — all routes including /voice/stream (SSE) and /sign
-│   ├── profile.py         ProfileManager: presets + system prompt builder
+│   ├── app.py             Flask — all routes: /analyze, /recommend, /solve, /voice/stream, /sign
+│   ├── profile.py         ProfileManager: presets + system/voice prompt builder
 │   ├── bedrock_model.py   Vision OCR via Bedrock (requests + Bearer token)
-│   ├── voice_model.py     Bedrock answers + Polly synthesis + board image support
+│   ├── voice_model.py     Bedrock answers + Polly synthesis + board context injection
 │   ├── prompts.py         USER_PROMPT for /analyze image payloads
 │   ├── formatter.py       Normalises { latex, explanation, confidence }
 │   ├── ai_interface.py    Abstract AIModel base class
@@ -232,10 +273,11 @@ CloudHacks-UCI-2026/
 │   ├── .env               ← your secrets, git-ignored
 │   └── .env.example       safe-to-commit template
 ├── frontend/
-│   ├── index.html         Onboarding, math panel, voice panel, sign language panel, MathJax, ARIA
-│   ├── script.js          Camera loop, profile system, Voice Study Mode, SSE audio queue
+│   ├── index.html         Onboarding, math panel, voice panel, step-by-step panel, sign panel, MathJax, ARIA
+│   ├── script.js          Camera loop, profile system, Voice Study Mode, SSE audio queue,
+│   │                      practice recommendations, step-by-step solver
 │   ├── sign_language.js   Sign Language Mode — TF.js hand detection, ASL classifier, /sign API
-│   └── style.css          Dark theme, onboarding cards, voice panel, sign language panel
+│   └── style.css          Dark theme, onboarding, voice panel, rec chips, solution steps
 ├── .gitignore
 └── README.md
 ```
@@ -269,11 +311,12 @@ The sign language classifier in `sign_language.js` uses a geometry-based approac
 
 ## Accessibility Standards Met
 
-- `aria-live="polite"` — explanation, voice status, and signed-text regions announce updates to screen readers
+- `aria-live="polite"` — explanation, voice status, signed-text, and practice recommendation regions announce updates to screen readers
 - `aria-live="assertive"` — warning banner fires immediately for errors
 - `role="dialog"` + `aria-modal="true"` on onboarding overlay
 - `aria-pressed` on the Always-On toggle reflects current state
 - All profile cards keyboard-navigable (Tab to focus, Enter / Space to select)
+- Practice chips keyboard-navigable (Tab to focus, Enter / Space to activate)
 - `body.high-contrast` and `body.simplified` CSS modifiers toggled from profile data
 - Sign Language Mode is fully text-only — no audio dependency anywhere in the Deaf / HoH flow
 
@@ -281,16 +324,18 @@ The sign language classifier in `sign_language.js` uses a geometry-based approac
 
 ## Troubleshooting
 
-| Symptom | Likely cause | Fix |
-|---|---|---|
-| `400` from Bedrock | Wrong model ID format | Use `us.anthropic.claude-sonnet-4-6` |
-| `403` from `/voice` | Profile has `voice_input: false` | Select Motor or Multi profile |
-| No audio in Voice Mode | Polly IAM creds not set | Expected — browser Web Speech API speaks automatically |
-| "Connection error" in browser | Opened as `file://` or wrong port | Visit `http://localhost:5001` |
-| Mic not working in Chrome | Needs HTTPS or localhost | Confirm URL is `localhost`, not an IP |
-| Sign panel not visible | Wrong profile selected | Select Deaf / HoH or Multiple needs |
-| Hand not detected | TF.js model still downloading | Wait 3–5 s after camera starts; typing fallback appears if model fails |
-| Old JS/CSS after restart | Browser cache | Open DevTools → Network → check "Disable cache" → reload |
+| Symptom                            | Likely cause                      | Fix                                                                    |
+| ---------------------------------- | --------------------------------- | ---------------------------------------------------------------------- |
+| `400` from Bedrock                 | Wrong model ID format             | Use `us.anthropic.claude-sonnet-4-6`                                   |
+| `403` from `/voice`                | Profile has `voice_input: false`  | Select Motor or Multi profile                                          |
+| No audio in Voice Mode             | Polly IAM creds not set           | Expected — browser Web Speech API speaks automatically                 |
+| "Connection error" in browser      | Opened as `file://` or wrong port | Visit `http://localhost:5001`                                          |
+| Mic not working in Chrome          | Needs HTTPS or localhost          | Confirm URL is `localhost`, not an IP                                  |
+| Sign panel not visible             | Wrong profile selected            | Select Deaf / HoH or Multiple needs                                    |
+| Hand not detected                  | TF.js model still downloading     | Wait 3–5 s after camera starts; typing fallback appears if model fails |
+| Practice chips not appearing       | `/analyze` returned low/no math   | Reposition camera closer to the math; good lighting helps              |
+| Step-by-step not appearing         | Chip not clicked                  | Click (don't just speak) one of the PRACTICE PROBLEMS chips            |
+| Old JS/CSS after restart           | Browser cache                     | Open DevTools → Network → check "Disable cache" → reload               |
 
 ---
 
@@ -302,3 +347,4 @@ The sign language classifier in `sign_language.js` uses a geometry-based approac
 - [ ] Per-student profile persistence in DynamoDB
 - [ ] Upgrade to Amazon Nova Pro for even faster vision inference
 - [ ] Expand ASL classifier to full 26-letter alphabet + common math terms
+- [ ] Animated solution reveal — steps appear one at a time with a progress indicator

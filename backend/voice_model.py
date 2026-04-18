@@ -46,12 +46,46 @@ class VoiceModel:
             self.polly = None
             logger.warning("No IAM creds — Polly disabled, frontend uses Web Speech API fallback")
 
+    @staticmethod
+    def _format_board_context(board_context: dict) -> str:
+        """
+        Format the board_context dict sent by the frontend into a text block
+        that is injected before the student's question so Bedrock has full context.
+        """
+        if not board_context:
+            return ""
+
+        parts = []
+
+        latex = board_context.get("last_latex", "")
+        explanation = board_context.get("last_explanation", "")
+        if latex:
+            parts.append(f"Current math problem on the board: {latex}")
+        if explanation:
+            parts.append(f"Plain English: {explanation}")
+
+        rec_list = board_context.get("recommendations", [])
+        if rec_list:
+            labeled = " | ".join(
+                f"Problem {i+1}: {r.get('text', '')}"
+                for i, r in enumerate(rec_list)
+            )
+            parts.append(
+                f"Practice problem chips currently shown to the student "
+                f"(numbered for reference): {labeled}. "
+                f"When the student says 'solve problem 1' or 'problem 2', "
+                f"they mean the corresponding question above."
+            )
+
+        return "\n".join(parts)
+
     def answer_question(
         self,
         transcript: str,
         profile: dict,
         context: list = None,
-        image_b64: str = None,      # JPEG base64 from current webcam frame
+        image_b64: str = None,       # JPEG base64 from current webcam frame
+        board_context: dict = None,  # rec chips + last LaTeX (for problem resolution)
     ) -> dict:
         """
         Send the student's spoken question to Bedrock and return a structured answer.
@@ -71,8 +105,16 @@ class VoiceModel:
 
         messages = list(safe_context)
 
+        # Format board context (rec chips + last LaTeX) into a text prefix
+        ctx_text = self._format_board_context(board_context or {})
+
         # Build the user message — include board image when available
         if image_b64:
+            text_body = (
+                "[The student's current board or worksheet is shown in the image above.]\n\n"
+                + (f"[Board context]\n{ctx_text}\n\n" if ctx_text else "")
+                + f"Student question: {transcript}"
+            )
             user_content = [
                 {
                     "type": "image",
@@ -82,14 +124,10 @@ class VoiceModel:
                         "data": image_b64,
                     },
                 },
-                {
-                    "type": "text",
-                    "text": (
-                        "[The student's current board or worksheet is shown in the image above.]\n\n"
-                        f"Student question: {transcript}"
-                    ),
-                },
+                {"type": "text", "text": text_body},
             ]
+        elif ctx_text:
+            user_content = f"[Board context]\n{ctx_text}\n\nStudent question: {transcript}"
         else:
             user_content = transcript
 

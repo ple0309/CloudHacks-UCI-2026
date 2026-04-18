@@ -129,12 +129,15 @@ def voice():
     if not profile.get("voice_input", False):
         return jsonify({"error": "Voice input not enabled for this profile"}), 403
 
-    context = body.get("context", [])[-4:]
-    image_b64 = body.get("image_b64")
+    context       = body.get("context", [])[-4:]
+    image_b64     = body.get("image_b64")
+    board_context = body.get("board_context", {})
 
     try:
         vm = VoiceModel()
-        answer_dict = vm.answer_question(transcript, profile, context, image_b64)
+        answer_dict = vm.answer_question(
+            transcript, profile, context, image_b64, board_context=board_context
+        )
 
         audio_b64 = None
         if profile.get("voice_output") and not profile.get("captions_only"):
@@ -186,15 +189,18 @@ def voice_stream():
     if not profile.get("voice_input", False):
         return jsonify({"error": "Voice input not enabled for this profile"}), 403
 
-    context = body.get("context", [])[-4:]
-    image_b64 = body.get("image_b64")   # current board frame, may be None
+    context       = body.get("context", [])[-4:]
+    image_b64     = body.get("image_b64")    # current board frame, may be None
+    board_context = body.get("board_context", {})
 
     def generate():
         try:
             vm = VoiceModel()
 
-            # Step 1 — get Bedrock answer (includes board image if provided)
-            answer_dict = vm.answer_question(transcript, profile, context, image_b64)
+            # Step 1 — get Bedrock answer (includes board image + rec context if provided)
+            answer_dict = vm.answer_question(
+                transcript, profile, context, image_b64, board_context=board_context
+            )
 
             # Step 2 — stream answer text first so UI updates immediately
             yield (
@@ -246,6 +252,227 @@ def voice_stream():
             "Connection": "keep-alive",
         },
     )
+
+
+# ─── Practice Recommendations ────────────────────────────────────────────────
+
+@app.route("/recommend", methods=["POST"])
+def recommend():
+    """
+    Non-critical endpoint — ALWAYS returns HTTP 200.
+    On any error: returns { "recommendations": [] }.
+
+    Body: { latex, explanation, profile }
+    Returns: { "recommendations": [{ text, latex }, { text, latex }] }
+    """
+    body = request.get_json(force=True, silent=True) or {}
+
+    latex       = body.get("latex", "").strip()
+    explanation = body.get("explanation", "").strip()
+    raw_profile = body.get("profile")
+
+    if not latex:
+        return jsonify({"recommendations": []}), 200
+
+    pm      = ProfileManager()
+    profile = raw_profile if isinstance(raw_profile, dict) \
+              else pm.get_preset("visual")
+
+    level_map = {
+        "beginner": (
+            "Both problems must be SIMPLER: smaller numbers, "
+            "same operation, no new concepts."
+        ),
+        "advanced": (
+            "Both problems must be a step HARDER: extend the concept "
+            "or combine it with an adjacent skill."
+        ),
+    }
+    level_note = level_map.get(
+        profile.get("level", "standard"),
+        "Both problems should be similar difficulty — same concept, "
+        "different numbers or a slight variation."
+    )
+
+    system = (
+        "You are a STEM tutor generating targeted practice problems. "
+        "Respond with valid JSON only — no markdown, no preamble. "
+        "The JSON must have exactly one key: 'recommendations', "
+        "an array of EXACTLY 2 objects. "
+        "Each object: "
+        "\"text\" (str — a spoken question ≤12 words, starts with a verb "
+        "such as Factor, Solve, Find, Simplify, Differentiate), "
+        "\"latex\" (str — LaTeX of the PROBLEM ONLY, not the answer)."
+    )
+
+    user_msg = (
+        f"Detected problem: {latex}\n"
+        f"Explanation: {explanation}\n\n"
+        f"Generate 2 practice problems using the EXACT SAME mathematical "
+        f"concept but DIFFERENT expressions. "
+        f"{level_note} "
+        f"Never repeat the original expression. "
+        f"Never put the solution in the latex field. "
+        f"Return ONLY the JSON object."
+    )
+
+    bedrock_url = (
+        f"https://bedrock-runtime.{os.getenv('AWS_REGION','us-east-1')}"
+        f".amazonaws.com/model/"
+        f"{os.getenv('BEDROCK_MODEL_ID','us.anthropic.claude-sonnet-4-6')}"
+        f"/invoke"
+    )
+    headers = {
+        "Content-Type":  "application/json",
+        "Authorization": f"Bearer {os.getenv('BEDROCK_API_KEY')}"
+    }
+    payload = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 220,
+        "system":   system,
+        "messages": [{"role": "user", "content": user_msg}]
+    }
+
+    try:
+        resp = requests.post(bedrock_url, json=payload,
+                             headers=headers, timeout=10)
+        resp.raise_for_status()
+        raw = resp.json()["content"][0]["text"].strip()
+
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
+
+        result = json.loads(raw)
+        recs   = list(result.get("recommendations", []))[:2]
+
+        normalised = []
+        for item in recs:
+            if isinstance(item, dict):
+                normalised.append({
+                    "text":  str(item.get("text",  "")).strip(),
+                    "latex": str(item.get("latex", "")).strip()
+                })
+            elif isinstance(item, str) and item.strip():
+                normalised.append({"text": item.strip(), "latex": ""})
+
+        return jsonify({"recommendations": normalised})
+
+    except Exception as exc:
+        logger.warning("/recommend failed (non-critical): %s", exc)
+        return jsonify({"recommendations": []}), 200
+
+
+# ─── Step-by-Step Solver ──────────────────────────────────────────────────────
+
+@app.route("/solve", methods=["POST"])
+def solve():
+    """
+    Non-critical endpoint — ALWAYS returns HTTP 200.
+    Returns a structured step-by-step solution for a practice problem chip.
+
+    Body: { latex, text, profile }
+    Returns: {
+      steps:       [{ num, description, latex }],   ← 3-5 steps
+      final_latex: str                               ← final answer expression
+    }
+    """
+    body = request.get_json(force=True, silent=True) or {}
+
+    latex       = body.get("latex", "").strip()
+    text        = body.get("text",  "").strip()
+    raw_profile = body.get("profile")
+
+    if not latex and not text:
+        return jsonify({"steps": [], "final_latex": ""}), 200
+
+    pm      = ProfileManager()
+    profile = raw_profile if isinstance(raw_profile, dict) \
+              else pm.get_preset("visual")
+
+    level_note = {
+        "beginner": (
+            "Use very simple language (grade 8 level). "
+            "Avoid jargon. Use everyday analogies."
+        ),
+        "advanced": (
+            "You may use standard mathematical terminology."
+        ),
+    }.get(
+        profile.get("level", "standard"),
+        "Use clear language accessible to a high-school or early-college student."
+    )
+
+    system = (
+        "You are a STEM tutor generating a concise step-by-step solution. "
+        "Respond with valid JSON only — no markdown, no preamble. "
+        "The JSON must have exactly two keys: "
+        "'steps' (array of objects, each with: "
+        "\"num\" (int, 1-based step number), "
+        "\"description\" (str — one plain-English sentence explaining this step, ≤18 words), "
+        "\"latex\" (str — LaTeX showing the math transformation at this step, or \"\")), "
+        "'final_latex' (str — LaTeX of the final answer expression only, not the full equation)."
+    )
+
+    user_msg = (
+        f"Problem expression: {latex}\n"
+        f"Instruction: {text}\n\n"
+        f"Generate a clear numbered solution with 3-5 steps. "
+        f"Each step must show ONE logical action. "
+        f"{level_note} "
+        f"Never include prose outside the JSON structure. "
+        f"Return ONLY the JSON object."
+    )
+
+    bedrock_url = (
+        f"https://bedrock-runtime.{os.getenv('AWS_REGION','us-east-1')}"
+        f".amazonaws.com/model/"
+        f"{os.getenv('BEDROCK_MODEL_ID','us.anthropic.claude-sonnet-4-6')}"
+        f"/invoke"
+    )
+    headers = {
+        "Content-Type":  "application/json",
+        "Authorization": f"Bearer {os.getenv('BEDROCK_API_KEY')}"
+    }
+    payload = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 500,
+        "system":   system,
+        "messages": [{"role": "user", "content": user_msg}]
+    }
+
+    try:
+        resp = requests.post(bedrock_url, json=payload,
+                             headers=headers, timeout=12)
+        resp.raise_for_status()
+        raw = resp.json()["content"][0]["text"].strip()
+
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
+
+        result      = json.loads(raw)
+        steps       = list(result.get("steps", []))[:5]
+        final_latex = str(result.get("final_latex", "")).strip()
+
+        normalised_steps = []
+        for s in steps:
+            if isinstance(s, dict):
+                normalised_steps.append({
+                    "num":         int(s.get("num", len(normalised_steps) + 1)),
+                    "description": str(s.get("description", "")).strip(),
+                    "latex":       str(s.get("latex", "")).strip(),
+                })
+
+        return jsonify({"steps": normalised_steps, "final_latex": final_latex})
+
+    except Exception as exc:
+        logger.warning("/solve failed (non-critical): %s", exc)
+        return jsonify({"steps": [], "final_latex": ""}), 200
 
 
 # ─── Sign Language Mode ───────────────────────────────────────────────────────
