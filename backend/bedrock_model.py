@@ -8,7 +8,7 @@ import requests
 from dotenv import load_dotenv
 
 from ai_interface import AIModel
-from prompts import SYSTEM_PROMPT, USER_PROMPT
+from prompts import USER_PROMPT
 from formatter import format_response
 
 load_dotenv()
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class BedrockModel(AIModel):
     def __init__(self):
         self.region = os.getenv("AWS_REGION", "us-east-1")
-        self.model_id = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4-6")
+        self.model_id = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
         self.api_key = os.getenv("BEDROCK_API_KEY")
         self.bucket = os.getenv("S3_BUCKET_NAME")
 
@@ -44,7 +44,19 @@ class BedrockModel(AIModel):
             self.s3 = None
             logger.info("S3 archiving disabled — no IAM credentials or bucket configured")
 
-    def process_image(self, image_path: str) -> dict:
+    def process_image(self, image_path: str, profile: dict = None) -> dict:
+        """
+        Analyze a webcam frame and return { latex, explanation, confidence }.
+
+        profile: disability profile dict — used to build a personalised system prompt.
+                 Falls back to 'visual' preset if not provided.
+        """
+        from profile import ProfileManager
+        pm = ProfileManager()
+        if profile is None:
+            profile = pm.get_preset("visual")
+        system_prompt = pm.build_system_prompt(profile)
+
         s3_key = None
         try:
             with open(image_path, "rb") as f:
@@ -65,7 +77,7 @@ class BedrockModel(AIModel):
             payload = {
                 "anthropic_version": "bedrock-2023-05-31",
                 "max_tokens": 1024,
-                "system": SYSTEM_PROMPT,
+                "system": system_prompt,
                 "messages": [
                     {
                         "role": "user",
@@ -106,7 +118,7 @@ class BedrockModel(AIModel):
             body = resp.json()
             raw_text = body["content"][0]["text"]
 
-            # Strip markdown fences if the model wraps output in ```json ... ```
+            # Strip markdown fences if the model wraps output despite instructions
             cleaned = raw_text.strip()
             if cleaned.startswith("```"):
                 parts = cleaned.split("```")
