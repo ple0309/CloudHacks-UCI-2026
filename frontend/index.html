@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8" />
+    <title>MuTeX Live Demo</title>
+    <link rel="stylesheet" href="style.css" />
+
+    <!-- MathJax for LaTeX rendering -->
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] },
+            svg: { fontCache: 'global' }
+        };
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+</head>
+
+<body>
+    <div class="page">
+        <header class="hero">
+            <p class="eyebrow">Accessible Math Transcription</p>
+            <h1>MuTeX Live Demo</h1>
+            <p class="subtext">
+                Live camera input, automatic frame analysis, LaTeX transcription, and read-aloud support.
+            </p>
+        </header>
+
+        <main class="dashboard">
+            <section class="card camera-card">
+                <div class="card-header">
+                    <h2>Live Camera</h2>
+                    <span class="badge" id="statusBadge">idle</span>
+                </div>
+
+                <div class="camera-frame">
+                    <video id="camera" autoplay playsinline></video>
+                    <canvas id="snapshot" style="display:none;"></canvas>
+                </div>
+
+                <div class="buttons">
+                    <button id="startBtn">Start Camera</button>
+                    <button id="stopBtn" class="secondary">Stop Camera</button>
+                    <button id="voiceBtn" class="accent">Read Aloud</button>
+                </div>
+
+                <p id="status" class="status-text">Status: idle</p>
+            </section>
+
+            <section class="card result-card">
+                <div class="card-header">
+                    <h2>Detected Result</h2>
+                </div>
+
+                <div class="result-block">
+                    <label>LaTeX</label>
+                    <pre id="latexOutput">Waiting...</pre>
+                </div>
+
+                <div class="result-block">
+                    <label>Rendered Math</label>
+                    <div id="renderedOutput" class="render-box">Waiting...</div>
+                </div>
+
+                <div class="result-block">
+                    <label>Explanation</label>
+                    <div id="explanationOutput" class="text-box">Waiting...</div>
+                </div>
+
+                <div class="meta-row">
+                    <div class="meta-box">
+                        <span class="meta-label">Confidence</span>
+                        <span id="confidenceOutput" class="meta-value">Waiting...</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
