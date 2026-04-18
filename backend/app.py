@@ -1,9 +1,11 @@
 import os
 import re
 import json
+import base64
 import logging
 from uuid import uuid4
 
+import requests                  # HTTP client — used by /sign and VoiceModel
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
@@ -246,6 +248,130 @@ def voice_stream():
     )
 
 
+# ─── Sign Language Mode ───────────────────────────────────────────────────────
+
+@app.route("/sign", methods=["POST"])
+def sign():
+    """
+    Sign Language Mode endpoint.
+    Receives the captured math image + the fingerspelled question text.
+    Uses the hearing profile (captions_only=True, no Polly call).
+    Returns text answer + optional LaTeX — NO audio.
+
+    Body:  { image_b64, signed_text, profile, context }
+    Returns: { signed_text, latex, answer, subject, confidence }
+    """
+    body = request.get_json(force=True, silent=True) or {}
+
+    image_b64   = body.get("image_b64",   "").strip()
+    signed_text = body.get("signed_text", "").strip()
+
+    if not signed_text:
+        return jsonify({"error": "signed_text field required"}), 400
+
+    raw_profile = body.get("profile")
+    pm = ProfileManager()
+    if raw_profile and isinstance(raw_profile, dict):
+        profile = raw_profile
+    else:
+        profile = pm.get_preset("hearing")
+
+    # Force captions_only regardless of what profile says — never call Polly
+    profile["captions_only"] = True
+    profile["voice_output"]  = False
+
+    context = body.get("context", [])[-4:]
+
+    system_prompt = (
+        "You are an expert STEM tutor helping a deaf student who "
+        "cannot hear. They photographed a math problem and asked a "
+        "question about it using ASL fingerspelling. "
+        "The image shows their math problem. "
+        "Their signed question is provided as text. "
+        "Respond with valid JSON only — no markdown, no preamble. "
+        "JSON keys: latex (str, LaTeX of the answer expression or "
+        "empty string if not applicable), answer (str, clear plain "
+        "English explanation — use bullet points and short paragraphs "
+        "because the student is reading not listening), subject (str), "
+        "confidence (str: high|medium|low). "
+        "Never refer to audio, sound, or listening."
+    )
+
+    # Build multimodal message — image + signed question
+    user_content = []
+    if image_b64:
+        user_content.append({
+            "type": "image",
+            "source": {
+                "type":       "base64",
+                "media_type": "image/png",
+                "data":       image_b64,
+            }
+        })
+    user_content.append({
+        "type": "text",
+        "text": f"Student question (signed via ASL fingerspelling): {signed_text}"
+    })
+
+    messages = list(context)
+    messages.append({"role": "user", "content": user_content})
+
+    bedrock_api_key = os.getenv("BEDROCK_API_KEY")
+    model_id        = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6")
+    region          = os.getenv("AWS_REGION", "us-east-1")
+    url = (
+        f"https://bedrock-runtime.{region}.amazonaws.com"
+        f"/model/{model_id}/invoke"
+    )
+
+    payload = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 600,
+        "system":     system_prompt,
+        "messages":   messages,
+    }
+    headers = {
+        "Content-Type":  "application/json",
+        "Authorization": f"Bearer {bedrock_api_key}",
+    }
+
+    raw = ""
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=15)
+        if not resp.ok:
+            logger.error("/sign Bedrock HTTP %s — %s", resp.status_code, resp.text[:300])
+        resp.raise_for_status()
+        raw = resp.json()["content"][0]["text"].strip()
+
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
+
+        result = json.loads(raw)
+        return jsonify({
+            "signed_text": signed_text,
+            "latex":       str(result.get("latex", "")),
+            "answer":      str(result.get("answer", "")),
+            "subject":     str(result.get("subject", "general")),
+            "confidence":  result.get("confidence", "medium"),
+        })
+
+    except json.JSONDecodeError:
+        return jsonify({
+            "signed_text": signed_text,
+            "latex":       "",
+            "answer":      raw[:800] if raw else "Could not parse answer.",
+            "subject":     "unknown",
+            "confidence":  "low",
+        })
+    except Exception as exc:
+        logger.error("/sign error: %s", exc, exc_info=True)
+        return jsonify({"error": str(exc)}), 500
+
+
 if __name__ == "__main__":
-    # threaded=True is required for SSE — each request needs its own thread
-    app.run(debug=True, threaded=True)
+    # Port 5001 — macOS Monterey+ reserves port 5000 for AirPlay Receiver
+    # threaded=True is required for SSE streaming
+    app.run(debug=True, threaded=True, port=5001)
