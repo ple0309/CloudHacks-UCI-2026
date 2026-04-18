@@ -1,15 +1,20 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="api-url" content="" />
     <title>MuTeX Live Demo</title>
     <link rel="stylesheet" href="style.css" />
 
-    <!-- MathJax for LaTeX rendering -->
+    <!-- MathJax — supports display math \[ \] and inline math \( \) -->
     <script>
         window.MathJax = {
-            tex: { inlineMath: [['$', '$'], ['\\(', '\\)']] },
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']]
+            },
             svg: { fontCache: 'global' }
         };
     </script>
@@ -17,6 +22,9 @@
 </head>
 
 <body>
+    <!-- Screen-reader live region: announces explanation updates automatically -->
+    <div id="ariaLive" aria-live="polite" aria-atomic="true" class="sr-only"></div>
+
     <div class="page">
         <header class="hero">
             <p class="eyebrow">Accessible Math Transcription</p>
@@ -26,51 +34,54 @@
             </p>
         </header>
 
-        <main class="dashboard">
-            <section class="card camera-card">
+        <!-- Warning banner (hidden by default, shown on low confidence / errors) -->
+        <div id="warningBanner" class="warning-banner" hidden aria-live="assertive" role="alert"></div>
+
+        <main class="dashboard" aria-label="MuTeX analysis dashboard">
+            <section class="card camera-card" aria-label="Live camera feed">
                 <div class="card-header">
                     <h2>Live Camera</h2>
-                    <span class="badge" id="statusBadge">idle</span>
+                    <span class="badge" id="statusBadge" aria-label="Camera status">idle</span>
                 </div>
 
                 <div class="camera-frame">
-                    <video id="camera" autoplay playsinline></video>
-                    <canvas id="snapshot" style="display:none;"></canvas>
+                    <video id="camera" autoplay playsinline aria-label="Webcam preview"></video>
+                    <canvas id="snapshot" style="display:none;" aria-hidden="true"></canvas>
                 </div>
 
-                <div class="buttons">
+                <div class="buttons" role="group" aria-label="Camera controls">
                     <button id="startBtn">Start Camera</button>
                     <button id="stopBtn" class="secondary">Stop Camera</button>
                     <button id="voiceBtn" class="accent">Read Aloud</button>
                 </div>
 
-                <p id="status" class="status-text">Status: idle</p>
+                <p id="status" class="status-text" aria-live="polite">Status: idle</p>
             </section>
 
-            <section class="card result-card">
+            <section class="card result-card" aria-label="Detected math result">
                 <div class="card-header">
                     <h2>Detected Result</h2>
                 </div>
 
                 <div class="result-block">
-                    <label>LaTeX</label>
-                    <pre id="latexOutput">Waiting...</pre>
+                    <label for="latexOutput">LaTeX</label>
+                    <pre id="latexOutput" aria-label="LaTeX source code">Waiting...</pre>
                 </div>
 
                 <div class="result-block">
-                    <label>Rendered Math</label>
-                    <div id="renderedOutput" class="render-box">Waiting...</div>
+                    <label for="renderedOutput">Rendered Math</label>
+                    <div id="renderedOutput" class="render-box" aria-label="Rendered mathematical expression">Waiting...</div>
                 </div>
 
                 <div class="result-block">
-                    <label>Explanation</label>
-                    <div id="explanationOutput" class="text-box">Waiting...</div>
+                    <label for="explanationOutput">Explanation</label>
+                    <div id="explanationOutput" class="text-box" aria-label="Plain English explanation">Waiting...</div>
                 </div>
 
                 <div class="meta-row">
                     <div class="meta-box">
                         <span class="meta-label">Confidence</span>
-                        <span id="confidenceOutput" class="meta-value">Waiting...</span>
+                        <span id="confidenceOutput" class="meta-value" aria-label="Detection confidence">Waiting...</span>
                     </div>
                 </div>
             </section>
