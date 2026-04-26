@@ -1,8 +1,8 @@
-# MuTeX — Accessible AI Study Platform
+# Mindfulness AI — Accessible AI Study Platform
 
 > **CloudHacks UCI 2026** · Built for students with disabilities who deserve equal access to STEM.
 
-MuTeX turns any math — handwritten or printed — into LaTeX, a rendered equation, a plain-English explanation, and a spoken answer, all in real time. A disability-profile onboarding screen adapts the entire interface before the student ever sees the main view.
+Mindfulness AI turns any math — handwritten or printed — into LaTeX, a rendered equation, a plain-English explanation, and a spoken answer, all in real time. A disability-profile onboarding screen adapts the entire interface before the student ever sees the main view.
 
 Four study modes work together seamlessly:
 
